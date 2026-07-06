@@ -1,21 +1,25 @@
 # ISS-TUI
 
-A low-latency terminal ISS tracker written in pure C99. It pulls live position data and renders the space station gliding over a braille world map, complete with a fading trail of where it has been. Think of it as a live wallpaper, but for people who like terminals.
+A low-latency terminal multi-satellite tracker written in pure C99. It pulls live position data and renders satellites gliding over a braille world map, complete with a fading trail of where they have been. Think of it as a live wallpaper, but for people who like terminals.
 
 ## What You Get
 
 - A real-time map in your terminal, scaling to whatever size you give it
-- The actual ISS, live, right now, with lat/lon/altitude/velocity/timestamp
-- A fading trail (`* + : .`) so you can see where it came from
+- Multiple satellites: ISS, Tiangong, and Hubble, each with a coloured marker and trail
+- Live lat/lon/altitude/velocity/timestamp for each satellite
+- A fading trail (`* + : .`) so you can see where each one came from
 - Smooth coastlines thanks to Unicode braille sub-cell resolution
 - Truecolor earth tones for land, plain space for water — no garish blue wall
-- A bright red-on-yellow marker so you never lose the station
 
 ## How It Works
 
-Built with CMake. Zero external runtime dependencies beyond `curl` (to fetch the position) and a UTF-8 terminal.
+Built with CMake. Zero external runtime dependencies beyond `curl` (to fetch positions) and a UTF-8 terminal.
 
-It polls once per second from `https://api.wheretheiss.at/v1/satellites/25544`, falling back to `http://api.open-notify.org/iss-now.json` if needed. If both APIs are down, it shows the error and waits patiently — it does NOT make up a position.
+Data sources by satellite:
+- **ISS** (NORAD 25544): primary `https://api.wheretheiss.at/v1/satellites/25544`, fallback `http://api.open-notify.org/iss-now.json`.
+- **Tiangong** (NORAD 48274) and **Hubble** (NORAD 20580): `https://satlas.app/api/satellite-info?query={NORAD_ID}` (Satlas is the only free API found that serves non-ISS live orbital data).
+
+If all APIs are down for a satellite, it shows the error and waits patiently — it does NOT make up a position.
 
 The map itself is a baked Natural Earth 110m land mask (180x60), rendered with Unicode braille characters (U+2800-U+28FF) for sub-cell resolution. That is why the coastlines look surprisingly smooth for something made of dots.
 

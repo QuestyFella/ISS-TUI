@@ -144,17 +144,19 @@ static int fetch_sat(struct sat *sat, char *error, size_t error_size) {
     snprintf(error, error_size, "%s: Windows not supported", sat->name);
     return 0;
 #else
-    char cmd[256];
+    char cmd[384];
     if (sat->norad_id == 25544) {
+        /* ISS: primary wheretheiss.at, fallback open-notify */
         snprintf(cmd, sizeof(cmd),
             "(curl -fsS --connect-timeout 2 --max-time 5 "
             "https://api.wheretheiss.at/v1/satellites/25544 || "
             "curl -fsS --connect-timeout 2 --max-time 5 "
             "http://api.open-notify.org/iss-now.json) 2>/dev/null");
     } else {
+        /* Non-ISS: Satlas (wheretheiss.at only supports ISS 25544) */
         snprintf(cmd, sizeof(cmd),
             "curl -fsS --connect-timeout 2 --max-time 5 "
-            "https://api.wheretheiss.at/v1/satellites/%d 2>/dev/null",
+            "https://satlas.app/api/satellite-info?query=%d 2>/dev/null",
             sat->norad_id);
     }
 
@@ -176,18 +178,39 @@ static int fetch_sat(struct sat *sat, char *error, size_t error_size) {
         return 0;
     }
 
-    if (!json_number(json, "\"latitude\"", &sat->pos.lat) ||
-        !json_number(json, "\"longitude\"", &sat->pos.lon) ||
-        !json_number(json, "\"timestamp\"", &sat->pos.timestamp)) {
-        snprintf(error, error_size, "%s: parse failed", sat->name);
-        return 0;
-    }
-
-    if (!json_number(json, "\"altitude\"", &sat->pos.altitude)) {
-        sat->pos.altitude = -1.0;
-    }
-    if (!json_number(json, "\"velocity\"", &sat->pos.velocity)) {
-        sat->pos.velocity = -1.0;
+    if (sat->norad_id == 25544) {
+        /* ISS: wheretheiss.at / open-notify keys */
+        if (!json_number(json, "\"latitude\"", &sat->pos.lat) ||
+            !json_number(json, "\"longitude\"", &sat->pos.lon) ||
+            !json_number(json, "\"timestamp\"", &sat->pos.timestamp)) {
+            snprintf(error, error_size, "%s: parse failed", sat->name);
+            return 0;
+        }
+        if (!json_number(json, "\"altitude\"", &sat->pos.altitude)) {
+            sat->pos.altitude = -1.0;
+        }
+        if (!json_number(json, "\"velocity\"", &sat->pos.velocity)) {
+            sat->pos.velocity = -1.0;
+        }
+    } else {
+        /* Satlas: no timestamp returned, use time(NULL); velocity in kmps -> km/h */
+        if (!json_number(json, "\"latitude\"", &sat->pos.lat) ||
+            !json_number(json, "\"longitude\"", &sat->pos.lon)) {
+            snprintf(error, error_size, "%s: parse failed", sat->name);
+            return 0;
+        }
+        sat->pos.timestamp = (double)time(NULL);
+        if (!json_number(json, "\"altitude_km\"", &sat->pos.altitude)) {
+            sat->pos.altitude = -1.0;
+        }
+        {
+            double v = 0.0;
+            if (json_number(json, "\"velocity_kmps\"", &v)) {
+                sat->pos.velocity = v * 3600.0;
+            } else {
+                sat->pos.velocity = -1.0;
+            }
+        }
     }
 
     return 1;
