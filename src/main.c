@@ -364,16 +364,6 @@ static void draw(struct sat sats[], int nsats, const char *status) {
             } else if (cell >= 1) {
                 int s = (cell - 1) / 4;
                 int age = (cell - 1) % 4;
-                char tc;
-                if (age == 0) {
-                    tc = '*';
-                } else if (age == 1) {
-                    tc = '+';
-                } else if (age == 2) {
-                    tc = ':';
-                } else {
-                    tc = '.';
-                }
                 int dim = age * 50;
                 int r = sats[s].fg[0] - dim;
                 int g = sats[s].fg[1] - dim;
@@ -381,7 +371,24 @@ static void draw(struct sat sats[], int nsats, const char *status) {
                 if (r < 20) r = 20;
                 if (g < 20) g = 20;
                 if (b < 20) b = 20;
-                printf("\033[38;2;%d;%d;%dm%c\033[0m", r, g, b, tc);
+                unsigned char pattern = dots[row * width + col];
+                if (pattern != 0) {
+                    printf("\033[38;2;%d;%d;%dm", r, g, b);
+                    put_braille(pattern);
+                    printf("\033[0m");
+                } else {
+                    char tc;
+                    if (age == 0) {
+                        tc = '*';
+                    } else if (age == 1) {
+                        tc = '+';
+                    } else if (age == 2) {
+                        tc = ':';
+                    } else {
+                        tc = '.';
+                    }
+                    printf("\033[38;2;%d;%d;%dm%c\033[0m", r, g, b, tc);
+                }
             } else {
                 unsigned char pattern = dots[row * width + col];
                 if (pattern != 0) {
