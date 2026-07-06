@@ -1,12 +1,12 @@
-add_executable(bloom_valuation main.c)
-target_link_libraries(bloom_valuation PRIVATE bloom)
+add_executable(iss_tui main.c)
+target_link_libraries(iss_tui PRIVATE iss_tui_lib)
 
 if(MSVC)
-    target_compile_options(bloom_valuation PRIVATE /W4)
+    target_compile_options(iss_tui PRIVATE /W4)
 else()
-    target_compile_options(bloom_valuation PRIVATE -Wall -Wextra -pedantic)
+    target_compile_options(iss_tui PRIVATE -Wall -Wextra -pedantic)
 endif()
 
-install(TARGETS bloom_valuation
+install(TARGETS iss_tui
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )

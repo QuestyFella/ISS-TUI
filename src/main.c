@@ -11,7 +11,7 @@
 #include <sys/ioctl.h>
 #endif
 
-#include "bloom.h"
+#include "iss_tui.h"
 
 #define TRAIL 1024
 #define LAND_W 180
@@ -346,7 +346,7 @@ int main(void) {
     char status[128] = "starting";
 
     if (!isatty(STDOUT_FILENO)) {
-        puts(bloom_name());
+        puts(iss_tui_name());
         return 0;
     }
 

@@ -1,4 +1,4 @@
-# bloom-valuation
+# ISS-TUI
 
 A low-latency terminal ISS tracker written in pure C99. It pulls live position data and renders the space station gliding over a braille world map, complete with a fading trail of where it has been. Think of it as a live wallpaper, but for people who like terminals.
 
@@ -19,7 +19,7 @@ It polls once per second from `https://api.wheretheiss.at/v1/satellites/25544`, 
 
 The map itself is a baked Natural Earth 110m land mask (180x60), rendered with Unicode braille characters (U+2800-U+28FF) for sub-cell resolution. That is why the coastlines look surprisingly smooth for something made of dots.
 
-Non-interactive mode (piped output) just prints `bloom-valuation` so smoke tests stay fast.
+Non-interactive mode (piped output) just prints `ISS-TUI` so smoke tests stay fast.
 
 Press `Ctrl-C` to quit.
 
@@ -38,7 +38,7 @@ ctest --test-dir build -V
 ## Run
 
 ```sh
-./build/src/bloom_valuation
+./build/src/iss_tui
 ```
 
 ## Install

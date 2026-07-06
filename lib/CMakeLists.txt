@@ -1,25 +1,25 @@
-add_library(bloom STATIC bloom.c)
+add_library(iss_tui_lib STATIC iss_tui.c)
 
-target_include_directories(bloom PUBLIC
+target_include_directories(iss_tui_lib PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 
 if(MSVC)
-    target_compile_options(bloom PRIVATE /W4)
+    target_compile_options(iss_tui_lib PRIVATE /W4)
 else()
-    target_compile_options(bloom PRIVATE -Wall -Wextra -pedantic)
+    target_compile_options(iss_tui_lib PRIVATE -Wall -Wextra -pedantic)
 endif()
 
-install(TARGETS bloom
-    EXPORT bloomTargets
+install(TARGETS iss_tui_lib
+    EXPORT iss_tuiTargets
     ARCHIVE  DESTINATION ${CMAKE_INSTALL_LIBDIR}
     INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
 )
 
-install(FILES bloom.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+install(FILES iss_tui.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
-install(EXPORT bloomTargets
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/bloom
-    NAMESPACE bloom::
+install(EXPORT iss_tuiTargets
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/iss_tui
+    NAMESPACE iss_tui::
 )
