@@ -385,7 +385,7 @@ static void draw(struct sat sats[], int nsats, const char *status) {
             } else {
                 unsigned char pattern = dots[row * width + col];
                 if (pattern != 0) {
-                    printf("\033[38;2;140;125;100m");
+                    printf("\033[38;2;50;205;50m");
                     put_braille(pattern);
                     printf("\033[0m");
                 } else {
