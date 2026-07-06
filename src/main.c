@@ -13,9 +13,14 @@
 
 #include "iss_tui.h"
 
-#define TRAIL 1024
+#define MAX_SATS 3
+#define TRAIL 256
 #define LAND_W 180
 #define LAND_H 60
+
+/* ponytail: overlay packs trail as sat*4+age+1 (1-12) and markers as sat+13 (13-15).
+   This breaks at MAX_SATS>3 — sat 3 trail collides with sat 0 marker. */
+_Static_assert(MAX_SATS <= 3, "overlay encoding overflows at MAX_SATS>3");
 
 struct iss {
     double lat;
@@ -28,6 +33,17 @@ struct iss {
 struct track {
     double lat;
     double lon;
+};
+
+struct sat {
+    int norad_id;
+    const char *name;
+    char marker;
+    int fg[3];
+    struct iss pos;
+    int has_fix;
+    struct track trail[TRAIL];
+    int trail_count;
 };
 
 /* Natural Earth 110m land, rasterized once into an equirectangular mask. */
@@ -123,41 +139,55 @@ static int json_number(const char *json, const char *key, double *out) {
     return errno == 0 && end != p;
 }
 
-static int fetch_iss(struct iss *iss, char *error, size_t error_size) {
+static int fetch_sat(struct sat *sat, char *error, size_t error_size) {
 #ifdef _WIN32
-    snprintf(error, error_size, "live tracking needs curl/popen; Windows is not supported in this tiny build");
+    snprintf(error, error_size, "%s: Windows not supported", sat->name);
     return 0;
 #else
-    FILE *fp = popen("(curl -fsS --connect-timeout 2 --max-time 5 https://api.wheretheiss.at/v1/satellites/25544 || curl -fsS --connect-timeout 2 --max-time 5 http://api.open-notify.org/iss-now.json) 2>/dev/null", "r");
+    char cmd[256];
+    if (sat->norad_id == 25544) {
+        snprintf(cmd, sizeof(cmd),
+            "(curl -fsS --connect-timeout 2 --max-time 5 "
+            "https://api.wheretheiss.at/v1/satellites/25544 || "
+            "curl -fsS --connect-timeout 2 --max-time 5 "
+            "http://api.open-notify.org/iss-now.json) 2>/dev/null");
+    } else {
+        snprintf(cmd, sizeof(cmd),
+            "curl -fsS --connect-timeout 2 --max-time 5 "
+            "https://api.wheretheiss.at/v1/satellites/%d 2>/dev/null",
+            sat->norad_id);
+    }
+
+    FILE *fp = popen(cmd, "r");
     char json[4096] = {0};
     size_t used = 0;
 
     if (fp == NULL) {
-        snprintf(error, error_size, "could not run curl");
+        snprintf(error, error_size, "%s: could not run curl", sat->name);
         return 0;
     }
 
     while (used + 1 < sizeof(json) && fgets(json + used, (int)(sizeof(json) - used), fp) != NULL) {
-        used = strlen(json);
+        used += strlen(json + used);
     }
 
     if (pclose(fp) != 0 || used == 0) {
-        snprintf(error, error_size, "curl failed or returned no data");
+        snprintf(error, error_size, "%s: fetch failed", sat->name);
         return 0;
     }
 
-    if (!json_number(json, "\"latitude\"", &iss->lat) ||
-        !json_number(json, "\"longitude\"", &iss->lon) ||
-        !json_number(json, "\"timestamp\"", &iss->timestamp)) {
-        snprintf(error, error_size, "could not parse ISS JSON");
+    if (!json_number(json, "\"latitude\"", &sat->pos.lat) ||
+        !json_number(json, "\"longitude\"", &sat->pos.lon) ||
+        !json_number(json, "\"timestamp\"", &sat->pos.timestamp)) {
+        snprintf(error, error_size, "%s: parse failed", sat->name);
         return 0;
     }
 
-    if (!json_number(json, "\"altitude\"", &iss->altitude)) {
-        iss->altitude = -1.0;
+    if (!json_number(json, "\"altitude\"", &sat->pos.altitude)) {
+        sat->pos.altitude = -1.0;
     }
-    if (!json_number(json, "\"velocity\"", &iss->velocity)) {
-        iss->velocity = -1.0;
+    if (!json_number(json, "\"velocity\"", &sat->pos.velocity)) {
+        sat->pos.velocity = -1.0;
     }
 
     return 1;
@@ -181,7 +211,7 @@ static void map_size(int *width, int *height) {
     struct winsize ws;
     if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0 && ws.ws_col > 0 && ws.ws_row > 0) {
         *width = (int)ws.ws_col - 2;
-        *height = (int)ws.ws_row - 5;
+        *height = (int)ws.ws_row - (4 + MAX_SATS);
     }
 #endif
     if (*width < 40) *width = 40;
@@ -215,25 +245,23 @@ static void print_rule(char left, char mid, char right, int width) {
     puts((char[]){right, '\0'});
 }
 
-static void draw(const struct iss *iss, int has_fix, const struct track trail[], int trail_count, const char *status) {
+static void draw(struct sat sats[], int nsats, const char *status) {
     int width = 0;
     int height = 0;
-    char *map = NULL;
     unsigned char *dots = NULL;
-    int x = 0;
-    int y = 0;
+    unsigned char *overlay = NULL;
 
     map_size(&width, &height);
-    map = malloc((size_t)width * (size_t)height);
     dots = malloc((size_t)width * (size_t)height);
-    if (map == NULL || dots == NULL) {
-        free(map);
+    overlay = malloc((size_t)width * (size_t)height);
+    if (dots == NULL || overlay == NULL) {
         free(dots);
+        free(overlay);
         return;
     }
 
-    memset(map, ' ', (size_t)width * (size_t)height);
     memset(dots, 0, (size_t)width * (size_t)height);
+    memset(overlay, 0, (size_t)width * (size_t)height);
 
     for (int row = 0; row < height; row++) {
         for (int col = 0; col < width; col++) {
@@ -255,44 +283,49 @@ static void draw(const struct iss *iss, int has_fix, const struct track trail[],
         }
     }
 
-    for (int i = 0; i < trail_count; i++) {
-        project(trail[i].lat, trail[i].lon, width, height, &x, &y);
-        int age = trail_count - 1 - i;
-        char c;
-        if (age < 2) {
-            c = '*';
-        } else if (age < 6) {
-            c = '+';
-        } else if (age < 14) {
-            c = ':';
-        } else {
-            c = '.';
+    /* Trails: overlay = sat*4 + age_bracket + 1 (1-12) */
+    for (int s = 0; s < nsats; s++) {
+        if (!sats[s].has_fix) {
+            continue;
         }
-        map[y * width + x] = c;
+        for (int i = 0; i < sats[s].trail_count; i++) {
+            int x = 0;
+            int y = 0;
+            project(sats[s].trail[i].lat, sats[s].trail[i].lon, width, height, &x, &y);
+            int age = sats[s].trail_count - 1 - i;
+            int age_bracket = (age < 2) ? 0 : (age < 6) ? 1 : (age < 14) ? 2 : 3;
+            overlay[y * width + x] = (unsigned char)(s * 4 + age_bracket + 1);
+        }
     }
 
-    if (has_fix) {
-        project(iss->lat, iss->lon, width, height, &x, &y);
-        map[y * width + x] = '@';
+    /* Markers: overlay = sat + 13 (13-15) */
+    for (int s = 0; s < nsats; s++) {
+        if (!sats[s].has_fix) {
+            continue;
+        }
+        int x = 0;
+        int y = 0;
+        project(sats[s].pos.lat, sats[s].pos.lon, width, height, &x, &y);
+        overlay[y * width + x] = (unsigned char)(s + 13);
     }
 
     printf("\033[H\033[2J");
-    printf("ISS tracker - Ctrl-C to quit\n");
-    if (has_fix) {
-        printf("lat %.3f  lon %.3f  ", iss->lat, iss->lon);
-        if (iss->altitude >= 0.0) {
-            printf("alt %.0f km  ", iss->altitude);
+    printf("Satellite tracker - Ctrl-C to quit\n");
+    for (int s = 0; s < nsats; s++) {
+        printf("\033[38;2;%d;%d;%dm%-8s\033[0m ",
+               sats[s].fg[0], sats[s].fg[1], sats[s].fg[2], sats[s].name);
+        if (sats[s].has_fix) {
+            printf("lat %.1f lon %.1f", sats[s].pos.lat, sats[s].pos.lon);
+            if (sats[s].pos.altitude >= 0.0) {
+                printf(" alt %.0fkm", sats[s].pos.altitude);
+            }
+            if (sats[s].pos.velocity >= 0.0) {
+                printf(" vel %.0fkm/h", sats[s].pos.velocity);
+            }
         } else {
-            printf("alt unknown  ");
+            printf("waiting...");
         }
-        if (iss->velocity >= 0.0) {
-            printf("velocity %.0f km/h  ", iss->velocity);
-        } else {
-            printf("velocity unknown  ");
-        }
-        printf("%.0f\n", iss->timestamp);
-    } else {
-        printf("waiting for first fix\n");
+        printf("\n");
     }
     printf("status: %s\n", status);
 
@@ -300,17 +333,32 @@ static void draw(const struct iss *iss, int has_fix, const struct track trail[],
     for (int row = 0; row < height; row++) {
         putchar('|');
         for (int col = 0; col < width; col++) {
-            char cell = map[row * width + col];
-            if (cell == '@') {
-                printf("\033[1;38;2;255;30;30;48;2;255;200;50m@\033[0m");
-            } else if (cell == '*') {
-                printf("\033[1;38;2;255;180;50m*\033[0m");
-            } else if (cell == '+') {
-                printf("\033[38;2;200;160;40m+\033[0m");
-            } else if (cell == ':') {
-                printf("\033[38;2;120;100;50m:\033[0m");
-            } else if (cell == '.') {
-                printf("\033[38;2;60;60;60m.\033[0m");
+            unsigned char cell = overlay[row * width + col];
+            if (cell >= 13) {
+                int s = cell - 13;
+                printf("\033[1;38;2;%d;%d;%dm%c\033[0m",
+                       sats[s].fg[0], sats[s].fg[1], sats[s].fg[2], sats[s].marker);
+            } else if (cell >= 1) {
+                int s = (cell - 1) / 4;
+                int age = (cell - 1) % 4;
+                char tc;
+                if (age == 0) {
+                    tc = '*';
+                } else if (age == 1) {
+                    tc = '+';
+                } else if (age == 2) {
+                    tc = ':';
+                } else {
+                    tc = '.';
+                }
+                int dim = age * 50;
+                int r = sats[s].fg[0] - dim;
+                int g = sats[s].fg[1] - dim;
+                int b = sats[s].fg[2] - dim;
+                if (r < 20) r = 20;
+                if (g < 20) g = 20;
+                if (b < 20) b = 20;
+                printf("\033[38;2;%d;%d;%dm%c\033[0m", r, g, b, tc);
             } else {
                 unsigned char pattern = dots[row * width + col];
                 if (pattern != 0) {
@@ -328,8 +376,8 @@ static void draw(const struct iss *iss, int has_fix, const struct track trail[],
     print_rule('+', '-', '+', width);
 
     fflush(stdout);
-    free(map);
     free(dots);
+    free(overlay);
 }
 
 static void sleep_one_second(void) {
@@ -339,11 +387,13 @@ static void sleep_one_second(void) {
 }
 
 int main(void) {
-    struct iss iss = {0};
-    struct track trail[TRAIL];
-    int trail_count = 0;
-    int has_fix = 0;
+    struct sat sats[MAX_SATS] = {
+        {.norad_id = 25544, .name = "ISS",      .marker = '@', .fg = {255, 30, 30}},
+        {.norad_id = 48274, .name = "Tiangong", .marker = 'T', .fg = {50, 255, 200}},
+        {.norad_id = 20580, .name = "Hubble",   .marker = 'H', .fg = {255, 50, 255}},
+    };
     char status[128] = "starting";
+    int fetch_idx = 0;
 
     if (!isatty(STDOUT_FILENO)) {
         puts(iss_tui_name());
@@ -353,24 +403,24 @@ int main(void) {
     signal(SIGINT, stop);
 
     while (running) {
-        if (fetch_iss(&iss, status, sizeof(status))) {
-            strcpy(status, "live");
-            has_fix = 1;
-        }
+        if (fetch_sat(&sats[fetch_idx], status, sizeof(status))) {
+            snprintf(status, sizeof(status), "%s: live", sats[fetch_idx].name);
+            sats[fetch_idx].has_fix = 1;
 
-        if (has_fix) {
-            if (trail_count < TRAIL) {
-                trail[trail_count].lat = iss.lat;
-                trail[trail_count].lon = iss.lon;
-                trail_count++;
+            struct sat *s = &sats[fetch_idx];
+            if (s->trail_count < TRAIL) {
+                s->trail[s->trail_count].lat = s->pos.lat;
+                s->trail[s->trail_count].lon = s->pos.lon;
+                s->trail_count++;
             } else {
-                memmove(trail, trail + 1, sizeof(trail[0]) * (TRAIL - 1));
-                trail[TRAIL - 1].lat = iss.lat;
-                trail[TRAIL - 1].lon = iss.lon;
+                memmove(s->trail, s->trail + 1, sizeof(s->trail[0]) * (TRAIL - 1));
+                s->trail[TRAIL - 1].lat = s->pos.lat;
+                s->trail[TRAIL - 1].lon = s->pos.lon;
             }
         }
 
-        draw(&iss, has_fix, trail, trail_count, status);
+        draw(sats, MAX_SATS, status);
+        fetch_idx = (fetch_idx + 1) % MAX_SATS;
         sleep_one_second();
     }
 
