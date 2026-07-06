@@ -49,7 +49,7 @@ cmake --install build --prefix /usr/local
 
 ## What's Next
 
-There is a whole bunch of stuff on the roadmap. Pass predictions. More satellites. TUI controls. Maybe some surprises. Stay tuned.
+There is a whole bunch of stuff on the roadmap. Pass predictions. More satellites. TUI controls. Maybe some surprises. Stay tuned :D
 
 ---
 
